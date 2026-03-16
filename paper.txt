@@ -1,0 +1,1162 @@
+Multi Agent Path Finding using Evolutionary Game Theory
+Sheryl Paul
+
+sherylpa@usc.edu
+University of Southern California
+Los Angeles California, USA
+
+ABSTRACT
+In this paper, we consider the problem of path �nding for a set of
+homogeneous and autonomous agents navigating a previously unknown stochastic environment. In our problem setting, each agent
+attempts to maximize a given utility function while respecting
+safety properties. Our solution is based on ideas from evolutionary
+game theory, namely replicating policies that perform well and
+diminishing ones that do not. We do a comprehensive comparison with related multiagent planning methods, and show that our
+technique beats state of the art RL algorithms in minimizing path
+length by nearly 30% in large spaces. We show that our algorithm
+is computationally faster than deep RL methods by at least an order
+of magnitude. We also show that it scales better with an increase
+in the number of agents as compared to other methods, path planning methods in particular. Lastly, we empirically prove that the
+policies that we learn are evolutionarily stable and thus impervious
+to invasion by any other policy.
+
+1
+
+INTRODUCTION
+
+Large-scale deployment of multiagent robotic systems is fast becoming a reality with applications in warehouse settings, �re�ghting, search and rescue missions in disaster recovery scenarios, and
+exploration of unknown environments. Multiagent path �nding
+(MAPF) [38] is an important challenge problem for such systems
+that involves �nding and planning suitable paths that ensure that
+each agent accomplishes its goal while avoiding collisions. MAPF
+has been applied to various problems, such as surveillance and
+patrolling [9, 16, 26], warehouse settings [2, 40], coordinating tug
+robots [23], train and aircraft scheduling [21, 27], among others.
+The initial work on MAPF assumes that the environment is fully
+known, the planner is centralized and can fully observe the environment and the locations of the agents therein, and that each
+agent explicitly knows the goal locations. This allows early MAPF
+approaches to use informed graph search algorithms to e�ciently
+obtain the optimal collision-free paths for agents. Later approaches
+investigate decentralized and hierarchical planning approaches. [6]
+In this paper, we wish to address the multiagent path �nding
+problem in environments that can have stochastic uncertainties,
+where agents are fully autonomous, and where the agents may
+not know the goal locations a priori. There are several practical
+scenarios where our algorithms could be applicable: for example,
+consider a warehouse setting where robots move items from shelves
+to the closest available empty container, or wild�re monitoring
+drones that need to �nd a path to the closest dangerous patch of
+wild�re. Approaches such as heuristic A* search and its variants
+[12] work very well in such scenarios for single agent systems;
+however, as we demonstrate in this paper, the scalability of naïve
+A* search-based methods su�ers with increasing number of agents
+and the size of the environment.
+
+Jyotirmoy V. Deshmukh
+
+jdeshmuk@usc.edu
+University of Southern California
+Los Angeles California, USA
+Our solution is based on techniques from evolutionary game
+theory (EGT) [36]. Evolutionary game theory attempts to model the
+behavior of large populations who repeatedly engage in strategic
+interactions [29]. Populations follow the Darwinian principle of
+survival and growth based on some �tness function, and we can
+dynamically model the success of chosen strategies over time. In
+our setting, we assume that the environment is stochastic and that
+the agents are autonomous and homogeneous. Here, by homogeneity, we mean that all agents utilize the same learned policy. We
+also assume that agents do not know the exact locations of their
+goals, and that they can start in any permissible start location in
+the environment. We assume that the state of the agent depends
+on its observation space (as de�ned by its perception sensors)1 .
+We assume that the user provides a utility function that can be
+evaluated on a speci�c path chosen by the agent. The goal of our
+method is to obtain a stochastic policy that maximizes the expected
+value of the utility function across all agents irrespective of the
+start location of each agent. The key idea is to treat the space of all
+possible state-action pairs as a population, where state-action pairs
+that are involved in high utility paths have increased probability of
+replication.
+With recent advances in planning for uncertain environments,
+many related methods [1, 44] that solve similar problems have
+emerged. Model-free Reinforcement learning (RL)-based methods
+[24, 41] use episodic experiences learned by a set of agents interacting with the environment to obtain policies that maximize a
+suitably de�ned reward function [15]. There is a vast amount of
+literature dealing with the theoretical aspects of multiagent RL (see
+[4, 47] for details.)
+Multiagent systems can also be viewed from a game-theoretic
+lens, and there has been recent interest in pursuing game-theoretic
+methods for path planning [46]. Such methods typically focus on
+agent interactions and obtain optimal policies by solving extensive
+form games [10] or focus on reward-shaping using mechanism
+design [19, 35]. Recently, there have been some cross-overs between
+game-theoretic methods and RL, in approaches that use solution
+concepts like the Shapley value for cooperative games to serve as
+rewards in RL [11, 14].
+Contributions: Our main contributions are as follows:
+(1) We investigate the problem of multiagent path �nding (MAPF)
+in stochastic and previously unknown environments, where
+agents are homogeneous and have limited visibility.
+(2) We permit agents to have multiple possible start locations
+and for the environment to provide multiple possible goal
+locations.
+1 In our experimental results we assume that agents have no visibility beyond the grid
+
+location that they occupy, but our framework permits agents that can have visibility
+extending to multiple cells or can also depend on communication with other agents.
+
+(3) We develop an algorithm based on evolutionary game theory
+to solve MAPF. We show that our technique is able to �nd
+shorter paths than RL algorithms such as the Monte Carlo
+method [39], Q-learning [42] and a deep RL method based
+on proximal policy optimization (PPO) [31].
+(4) We show that our algorithm leads to faster training times
+compared to Q-learning and PPO, and scales better with
+increasing number of agents compared to path planning
+methods like A*.
+(5) Our algorithm requires fewer policy updates than the Monte
+Carlo method or Q-learning, and is more space-e�cient than
+methods that use batchwise gradient descent (e.g., some
+implementations of PPO).
+
+g 8 (c)) is de�ned as an alternating sequence of states and actions
+de�ned as follows:
+⇣
+⌘
+g 8 (c) = B 8 0, 08 0, . . . , B 8 ✓ 1, 08 ✓ 1, B 8 ✓
+(1)
+
+PRELIMINARIES
+
+We are now ready to de�ne the problem that we wish to solve in
+this paper. Informally, we wish to �nd policies such that all agents
+starting from a randomly chosen initial state can reach some goal
+state within the maximum permitted time horizon ) . Formally,
+⇣
+⌘
+c ⇤ = arg max min Pr �nal(g 8 (c)) 2 ^ |g 8 (c)|  )
+(2)
+
+2
+
+Here, B 8 0 is sampled from ( with probability ] (B 8 0 ). The time index
+of the last state in the sequence is at most the time horizon ) , i.e.
+✓  ) . For each 9 2 [0, ✓ 1], the action 08 9 is sampled from
+the stochastic policy c (0 | B) conditioned on B = B 8 9 , and for all
+9 2 [0, ✓ 1], there is a ? > 0 s.t. the tuple (B 8 9 , 08 9 , ?, B 8 9+1 ) 2 .
+We denote that the path is sampled from the policy using the
+notation g ⇠ c. For a path as shown in (1), the path length (denoted
+|g |) is equal to ✓ + 1 (number of states in the path). The last state in
+the trajectory is denoted as �nal(g 8 (c)); in (1), this is B 8 ✓ .
+
+In this section, we present the basic terminology and notation
+required to de�ne the problem that we wish to solve. We consider a
+multi-agent system consisting of # autonomous agents that interact
+with each other within an environment. We model the environment
+as a �nite, rewardless, Markov Decision Process (MDP), formally
+de�ned as follows:
+
+c
+
+In other words, we want to �nd a policy that maximizes the probability that every agent reaches a goal state in less than ) number
+of steps.
+
+De�nition 2.1 (Rewardless MDP). A rewardless MDP is a tuple
+((, , , ]) where ( is a �nite set of states, is a �nite set of actions,
+is a set of transitions of the form (B, 0, ?, B 0 ), where B, B 0 2 (, 0 2 ,
+and ? 2 [0, 1] indicates the probability of executing that action,
+and ] : ( ! [0, 1] ( is a function that maps each agent state to the
+Õ
+probability of being an initial state ( B ] (B) = 1).
+
+3
+
+SOLUTION APPROACH
+
+In this section, we describe an algorithm based on the principles
+of evolutionary game theory (EGT) to also solve the problem stated
+in (2). We �rst do a brief review of EGT and related notions from
+game theory.
+The early work on EGT has roots in the application of traditional
+game theory to biological populations [36]. EGT utilizes Darwinian
+principles of the �ttest surviving and replicating, thereby growing
+in population while the weaker populations diminish. It di�ers
+from classical game theory in that it focuses more on the change
+in population dynamics over the passage of time, where a speci�c
+population group would be classi�ed as ones following the same
+strategy. We now describe how we apply EGT; the �rst step is to encode the problem of learning goal-seeking policies using dynamical
+evolution of populations.
+Encoding policies as populations
+We consider our population to consist of ( ⇥ organisms. We
+sample a policy c consisting of a set of organisms for replication.
+In order to choose which organisms to replicate, we de�ne a �tness
+function over the trajectory induced by the policy. We can de�ne
+this �tness function as:
+
+Let A denote the set of agents, A8 denote the 8 C⌘ agent, and
+C denote an arbitrary time of interest at which we observe the
+behavior of the environment. We assume that we are interested in
+episodic behaviors of an agent interacting with the environment,
+i.e., we assume that agent behaviors start at time 0 and end at a
+�nite time ) . In other words the length of the episode is bounded
+above by ) . The state of agent A8 at time C is denoted as B 8 C . The
+temporal behavior of the agent is consistent with the structure of
+the environment MDP, i.e., if the agent is in state B 8 C 2 ( at time
+C and it takes an action 08 C , then it stochastically moves to some
+state B 8 C +1 with probability ?.
+De�nition 2.2 (Stochastic Policy). A stochastic policy c for an
+MDP is a probability distribution over its actions conditioned by
+the current state, denoted as c (0 | B).
+Once we �x a stochastic policy, the MDP essentially becomes
+a Markov chain, where at any state BC8 , the 8 C⌘ agent executes the
+action 08 sampled from from c (0 | B = AC8 ). In general, each agent
+may have its individual policy, but, in this paper, we assume that
+agents are homogeneous, i.e., they all share the same policy.
+
+2.1
+
+8 2 {1,...,# }
+
+D = 3 (B !,B )
+0 !
+
+where 3 (B 0, B! ) is the Manhattan distance between the locations in
+states B 0 and B! We assign constructpolicy as a piece-wise function
+that is implementation dependant, for the population to be replicated i.e. increased if the �tness function is high, or decreased if it
+is low.
+After a su�cient number of episodes, we can construct a stochastic policy cCA08=43 using the algorithm ConstructPolicy.
+An ‘Evolutionarily Stable Strategy’ (ESS) is de�ned as a strategy
+(or policy), that cannot be invaded by the introduction of a foreign
+
+Problem De�nition: Goal-seeking policies
+
+An MDP with goal states is simply a rewardless MDP augmented
+with a set of goal states ⇢ (. In order to formally de�ne our
+problem, we �rst introduce the notion of state-action paths (or
+simply paths) under a �xed policy.
+De�nition 2.3 (State-Action Paths, Path Length, Final State). Given
+a policy c, a trajectory or path for the 8 C⌘ agent under c (denoted
+2
+
+Algorithm ConstructPolicy
+
+strategy (c=4F ) with a small enough probability ?=4F where 0 
+? 5 =4F  1.
+D (cCA08=43 )
+?=4F (D (c=4F )) + (1 ?=4F )(D (cCA08=43 ))
+
+1: for B 2 ( do
+
+if 80, 2>D=C4A (B, 0) == ? then
+cCA08= (0|B) = | 1 |
+4:
+else
+5:
+BD< = ⌃02 2>D=C4A (B, 0) <?
+6:
+for 0 2 : do
+7:
+if 2>D=C4A (B, 0)  0 then
+8:
+cCA08= (0|B) = ?
+9:
+else
+2>D=C4A (B,0)
+10:
+cCA08= (0|B) =
+BD<
+11:
+end if
+12:
+end for
+13:
+end if
+14: end for
+15: c 5 8=0; (0|B) = (1
+n)(cCA08= (0|B)) + (n)(cA0=3 (0|B)), 8B 2
+(, 0 2
+2:
+3:
+
+Algorithm MAPF-EGT algorithm
+1
+Initialize: cA0=3 (0|B)
+?, 8B 2 (, 0 2
+| | , 2>D=C4A (B, 0)
+, 9 =0
+for e = 1 to Number of Episodes: do
+Initialize: g 8 = ()
+ù Initialise empty trajectory
+
+Sample: B 1 0 , . . . , B 0 ⇠ ]
+ù Sample initial states
+while 9  ) do
+for all 8 2 {1, . . . , # } do
+if B 8 9 8 then
+ù While agent has not reached the goal
+089 ⇠ cA0=3
+ù Sample action from random policy
+g 8 = g 8 (B 8 9 , 08 9 )
+ù Append (s,a) pair to trajectory
+(B 8 9 , 08 9 , B 8 9 +1 ) ⇠ ù Sample next state from transitions
+end if
+if B 8 9 +1 2 then
+ù Perform update if agent has reached
+update(g 89 +1 )
+end if
+end for
+9
+9 +1
+end while
+for 0;; 8, where B 8 ) =>C 2
+do
+update(g 89 +1 )
+ù Perform update for all agents that have not
+reached
+end for
+end for
+
+The return in a multi-agent setting can be de�ned as an appropriate combination of the returns for all agents at time ) .
+For example, the cumulative return de�ned below is the sum of
+all returns, but overall returns based on maximum return or average
+return per agent could also be de�ned.
+Õ
+⌧) = 8 )C=0 '(BC8 , 08C ).
+
+In order to follow the collision-avoidance nature of path-�nding
+we introduce sets of permissible actions in each state. We de�ne
+⇢ :( !2 .
+If (B, 0, ?, B 0 ) 2 , and ? > 0:
+B < B 0 =) 0 2 ⇢ (B)
+and 0 8 ⇢ (B) =) B = B 0 .
+In other words, agents taking impermissible actions in a state
+return do not change their state. We now de�ne our rewards as
+follows:
+
+We describe our algorithm as follows: Initially our policy is
+de�ned to be random, and our counter(s, a) is de�ned to be ?
+for all state-action pairs. For each episode, we initialise an empty
+trajectory for all agents. While the episode does not terminate, we
+sample an action from the policy and append the state-action pair to
+the trajectory for each agent that has not yet reached the goal. We
+then move to the next state according to the structure of the MDP.
+If the agent reaches the goal we update the trajectory. At the end
+of the episode, the trajectories of all agents that have not reached
+the goal are also updated. The update criteria are implementation
+dependent and will be described in section 4.2.
+
+0
+8
+>
+< X1 8 5 B 8
+>
+'(B, 0, B ) = X 2 8 5 0 8 ⇢ (B)
+>
+> X3 8 5 B 0 2
+:
+where X 2 < X 1 < 0 < X 3
+0
+
+4 EXPERIMENTAL SETUP
+4.1 Baselines for comparision
+
+L���� 4.2. Policies that maximize rewards as de�ned above solve
+the problem de�ned in (2).
+P����. Proof follows from the fact that policies that maximize
+expected payo� must receive a positive reward, and the only way
+to receive a positive reward is by reaching a goal state.
+⇤
+
+Traditionally, the de�nition of an MDP also includes state-based
+or transition-based rewards. Formally, a transition-based reward
+function ' maps a state in B and an action in to some number in
+R. Reward functions allow us to de�ne the return or payo� for a
+sequence of actions performed by the agent.
+In contrast to reward function-based RL methods, we de�ne the
+notion of path �tness.
+
+MAPF using A* search: A* is an informed search problem
+which means the planner knows the goal statesa priori. It maintains
+a tree of paths that originate at the start state and extends these
+paths by expanding one state and generating all of its successors
+at each iteration until it reaches the goal. It chooses which state to
+expand by �nding the state which minimizes :
+
+De�nition 4.1 (Return or Payo� using Reward Functions). The
+return for any agent 8 at time ) can be de�ned as the sum of its
+rewards over an episode
+Õ
+⌧)8 = )C=0 '(BC8 , 08C )
+
+where 08C is sampled from c (0|BC8 ).
+
+(3)
+
+5 (B) = 6(B) + ⌘(B)
+
+where B is the next state on the path, 6(B) is the cost of travelling
+to state B from the start state and ⌘(B) is the heuristic of the cost
+3
+
+it will take to travel from state B to the goal state. It has been
+shown that A* �nds the shortest path with a heuristic that does not
+overestimate the distance to the goal state.
+There are many variants and extensions of A* such as Incremental A*[17], D*[37], D* lite[18], Iterative Deepening A*[20], etc. We
+will simply focus on A* as our baseline.
+Monte Carlo Reinforcement Learning: Unlike A*, Monte
+Carlo[34] based methods do not require any prior knowledge of the
+environment, and solely rely on previous episodes or simulations
+to estimate state/state-action based rewards.
+E c (B) = EB 0 | (B,0,B 0 )⇠ ('(B, 0, B 0 ) + E c (B 0 ))
+
+In particular, in order to estimate E c (B) (i.e. the value of a state
+B) given a set of episodes ⇢ generated by following the policy c
+and passing through B: We call each occurrence of B in an episode a
+E8B8C to B, ⌧ 9 is the return in episode 9 after visiting B, and ⌧ is the
+set of all such rewards. Then:
+E (B) =
+
+Figure 1: Sample Grid World
+Yellow: Start Locations, Red: Obstacle Locations, Green: Goal
+Locations
+
+E4A064 (⌧)
+
+The �rst visit Monte Carlo approach estimates E c (B) as the average of returns following the �rst occurrence of state B. We will use
+this approach to compare against our own.
+
+Further we specify the update function in our algorithm for our
+experimental setup.
+
+Q learning: Q-learning [39] is a model-free RL algorithm that
+maximizes the expected value of the total reward over any and
+all consecutive states following the starting state. The algorithm
+maintains a table of approximate Q-values for each state-action pair.
+The Q table comprising of & (B, 0) 8 B 2 (, 8 0 2 is initialised to
+random values at the beginning. After each step, it is updated as:
+& =4F (B, 0)
+
+1: update(g✓8 )
+;
+2: D =
+3 (B 0 ,B ✓ )
+3: if B ✓ 2 ⌧ then
+4:
+if D  [ then
+ù where 0  [  1
+5:
+D?30C4_?A>1 = 1 (1 D ) U
+ù update for shorter paths
+6:
+ù where U > 1
+7:
+else
+8:
+D?30C4_?A>1 = 1/D
+ù update for longer paths
+9:
+end if
+10:
+if A0=3 (0, 1) D?30C4_?A>1 then
+11:
+2>D=C4A (B: , 0: ) + a ù positive update for (s,a) pairs in shorter
+
+& 2DAA4=C (B, 0) + U ('(B, 0, B 0 )
+
++W max & (B 0, 0)
+0
+
+Algorithm UpdateFunction
+
+& 2DAA4=C (B, 0))
+
+Here, U is the learning rate (0  U  1) which determines the
+weight of the new information over the old, and W is the discount
+factor (0  W  1) which values the rewards received later, lower
+than the rewards received presently.
+
+paths
+12:
+end if
+13: else
+14:
+if D V then
+15:
+2>D=C4A (B: , 0: )
+paths
+16:
+end if
+17: end if
+
+Proximal Policy Optimization: The exact details of the PPO
+algorithm can be found in [31]. PPO is a policy gradient algorithm
+that assumes that a policy that is parameterized; for example, the
+policy could be represented by a neural network, and the set of
+weights of the neural network comprise the policy parameters. The
+key idea in PPO is to ensure that subsequent updates to the policy
+(through a stochastic gradient of the objective function) do not
+cause drastic changes in the policy. The objective function used by
+PPO is proportional to the episodic return as well as the ratio of
+the probability under the new and old policies.
+
+4.2
+
+` ù negative update for (s,a) pairs in longer
+ù where ` 2 I +
+
+Our research questions are as follows:
+Research Hypothesis 1: EGT for MAPF does as well or better than A*, Monte Carlo RL, Q Learning and PPO in minimising
+the average path length from the initial to the goal location with
+increasing size of the world and number of agents.
+Research Hypothesis 2: EGT for MAPF requires comparable
+to or less computation time than A*, Monte Carlo RL, Q Learning
+and PPO to �nd the policy c⇤ that maximizes the average reward
+with increasing size of the world and number of agents.
+Research Hypothesis 3: EGT for MAPF requires fewer policy
+updates than Monte Carlo RL and Q Learning to �nd the policy
+c⇤ that maximizes the average reward with increasing size of the
+world and number of agents.
+
+Description of Environment used for
+Experiments
+
+For our experiments, we de�ne the world as a two dimensional
+= ⇥ = grid, where each state B 2 (, is de�ned as (G, ~) where G and ~
+are coordinates. We de�ne $, ⌧ ⇢ (, O is the set of obstacle states
+such that BC8 * $, 88 2 # , 0  C  ) and G is the set of goal states.
+The algorithms aim to �nd a path from B 08 to any state B 2 ⌧ that
+maximises the total reward across all agents in an episode. The set
+of actions = {D?, 3>F=, ;4 5 C, A86⌘C, BC0~}.
+
+ù where a 2 I +
+
+4
+
+5
+
+EXPERIMENTAL EVALUATION AND
+RESULTS
+
+We collect results for increasing grid sizes, and number of agents
+for each of the aforementioned algorithms.
+Our experiments were carried out on a laptop with 2.0GHz dualcore Intel Core i5 processor and 16GB RAM.
+Q Learning and PPO perform updates step-wise and thus require
+much longer to train. As opposed to MAPF-EGT, which performs
+updates on only a selected number of episodes, these algorithms
+also acquire more training data in fewer episodes. We time out
+these algorithms accordingly.
+We use the ’stablebaselines3’ [28] implementation of PPO with
+standard values for the hyperparameters. Our algorithms have been
+implemented on OpenAi gym [3].
+
+5.1
+
+Experiments with increasing grid size
+
+Figure 3: Comparison of computation time against existing
+algorithms with increasing grid size
+episodes to achieve good performance. The highest time required
+by MAPF-EGT was only 13 minutes.
+
+Figure 2: Comparison of average best path length with other
+algorithms with increasing grid size
+Comparison of path length (timesteps): The experimental
+results indicate that MAPF-EGT performs comparatively better
+than the other algorithms in terms of path length (in timesteps)
+for large grids. PPO and Monte Carlo are comparable to or even
+slightly better than MAPF-EGT for smaller grid sizes but perform
+worse as the dimensions increase. Q learning does not scale well as
+it requires much longer to train in order to perform comparatively
+well. Due to inadequate training, Q learning has a lower success
+rate as compared to the other algorithms for large grids.
+
+Figure 4: Comparison of Policy Updates against existing
+algorithms with increasing grid size
+Comparison of number of policy updates: Another comparison we make is the number of updates to the policy during the
+training. MAPF-EGT and the Monte Carlo method both perform
+updates episodically, while Q learning and PPO perform updates
+step-wise or in batches of steps. However, unlike the other methods,
+MAPF-EGT considers only some episodes with performance su�ciently good or bad for updating its policy. This drastically reduces
+the number of policy updates to between 15,000 and 90,000. The
+Monte Carlo method on the other hand, with the same number of
+training episodes performs anywhere between 75,000 to 3 million
+updates which is nearly two orders of magnitude more than MAPFEGT. Q learning ranged from 200,000 to a worst case scenario of
+35 million updates, nearly three orders of magnitude higher than
+MAPF-EGT. As PPO performs only batches of updates, where every
+
+Comparison of computation time: We also compare computation time, which includes the training time and run time. MAPFEGT performs better in terms of computation time in comparison
+to the other algorithms for large grids except for A*. However we
+see later that A* scales badly for increase in the number of agents.
+Monte Carlo RL is faster for smaller grids (upto 200x200), but slows
+down thereafter. We limit the training time based on the size of
+the grid and the time it requires to train other algorithms for the
+same grid. The computation time for Q learning grows exponentially and remains insu�cient for an adequate number of training
+5
+
+Grid Size
+20x20
+50x50 100x100 150x150 200x200 300x300
+Timesteps
+29.7
+81.0
+118.41
+201.85
+222.77
+261.48
+Expected min distance from obstacles
+2.34
+2.36
+12.17
+10.19
+13.42
+13.15
+A star
+Computation Time (s)
+1
+5
+9
+41
+77
+184
+Policy Updates
+0
+0
+0
+0
+0
+0
+Timesteps
+13.19
+21.11
+110.59
+200.19
+275.37
+291.23
+Expected min distance from obstacles
+1.19
+1.08
+2.06
+2.96
+1.23
+1.48
+Monte Carlo
+Computation Time (s)
+2
+4
+20
+100
+145
+420
+Policy Updates
+150000 300000 500000
+750000 1000000 2000000
+Timesteps
+27.39
+51.61
+117.85
+297.57
+283.79
+340.73
+Expected min distance from obstacles
+1.5
+0.34
+7.07
+11.22
+14.49
+13.82
+Q learning
+Computation Time (s)
+10
+100
+210
+2000
+4200
+5000
+Policy Updates
+200000 400000 400000
+900000
+900000 2000000
+Timesteps
+26.79
+37.45
+122.43
+212.98
+215.72
+292.64
+Expected min distance from obstacles
+1.86
+1.27
+5.0
+8.01
+11.65
+8.61
+PPO
+Computation Time (s)
+13
+24
+212
+325
+477
+2455
+Policy Updates
+4
+4
+13
+50
+50
+150
+Timesteps
+20.75
+41.62
+116.05
+167.13
+205
+273.06
+Expected min distance from obstacles
+1.22
+1.36
+5.01
+5.97
+6.94
+6.73
+EGT
+Computation Time (s)
+2
+8
+25
+72
+300
+450
+Policy Updates
+15000
+25000
+30000
+30000
+80000
+90000
+Table 1: Comparison of MAPF-EGT against existing algorithms with increasing grid size
+Algorithm
+
+Metric for Comparison
+
+500x500
+341.67
+10.81
+537
+0
+344.79
+1.07
+1620
+3000000
+635.88
+11.35
+10000
+3500000
+341.75
+7.75
+7614
+250
+224.12
+6.94
+780
+85000
+
+batch consisted of 2048 timesteps, it performs the lowest number
+of updates upto 250 in the worst case. If extended to continuous
+spaces, the size of the neural network to represent the environment
+would grow extremely large, which might cause batch-wise updates
+to slow down, and require more memory. A star does not perform
+any updates and we indicate the number to be zero in the graph.
+Comparison of expected minimum distance from obstacles
+: Expected minimum distance from obstacles is a safety measure
+which checks for proximity to obstacles, edges and other agents, so
+a higher score is desirable. For RL algorithms like Q learning and
+PPO where disabled actions are penalised more than permissible
+actions, the value for the states with illegal actions will be lower,
+and this will propagate to states around them with the Bellman
+Equation. This gives some measure of robustness with respect to
+the distance from cells with disabled actions. Currently a drawback
+of our method is that the utility function does not take this into
+account. As our utility function does not take into consideration the
+distance from obstacles, we see that MAPF-EGT generally maintains
+a su�cient distance and is comparable to but outperformed by some
+existing algorithms.
+
+5.2
+
+Figure 5: Comparison of expected minimum distance from
+obstacles with existing algorithms with increasing grid size
+
+time of all the algorithms. It beats MAPF-EGT in total time, but we
+expect this will not be the case for larger grids as its training time
+grows exponentially. A star requires no pre-computation and has
+the same run time as its total time. The frontier for multiple agents
+grows large with increase in the number of agents and we expect
+this is why A star does not scale as well as the other algorithms.
+PPO scales comparably to MAPF-EGT but surprisingly, the Monte
+Carlo method does slightly worse. We note that in MAPF-EGT and
+Monte-Carlo, the training times are so small that the total time is
+nearly the same as the run time.
+
+Experiments with increasing number of
+agents
+
+In order to test the scaling with the number of agents for MAPF-EGT
+against other algorithms, we �x the grid size to 100x100 and vary
+the number of agents from 2 to 100. We also trained Q learning and
+PPO for more timesteps than we did in the previous experiment for
+comparable performance (in path length), to other algorithms. All
+algorithms achieved average path lengths from 90-115. We observe
+the Q learning take the longest time to train, but has the lowest run
+6
+
+Number of Agents (100x100 grid)
+2
+5
+10
+20
+30
+40
+50
+100
+A Star
+Total time 22
+62
+125
+275
+361
+468
+593 1719
+Total time 28
+50
+96
+203
+342
+523
+751 1172
+Monte Carlo
+Run Time 11
+33
+79
+186
+325
+506
+734 1155
+Total time 593 595 597
+602
+608
+613
+621
+655
+Q Learning
+Run Time
+1
+3
+5
+10
+16
+21
+29
+63
+Total time 916 957 1017 1057 1118 1196 1215 1756
+PPO
+Run Time 16
+57
+117
+157
+218
+296
+315
+856
+Total time 40
+50
+102
+175
+227
+325
+393
+826
+MAPF-EGT
+Run Time 15
+25
+77
+153
+202
+301
+368
+801
+Table 2: Comparison of MAPF-EGT against existing algorithms with increasing number of agents
+Algorithm
+
+Measure
+
+Convergence to ESS. In order to show that MAPF-EGT converges to an ESS, we capture the evolution of policies over time.
+Fig 8 shows that the heat map for all actions at time t0 is the same,
+t1 indicates the middle of the training process. t2 is taken around
+the end of the process. After introducing some number of random
+runs(>10% of total training runs)/updates to the policy, in t3 we see
+that there is still no change in the policy. This indicates that our
+learnt policy is resilient to the invasion by another other introduced
+policy and is therefore an ESS.
+
+Figure 6: Comparison of run time against existing
+algorithms with increasing number of agents
+
+Figure 8: Evolution of policies over time
+Therefore, we see from our results that all of the research hypotheses in the above section have been satis�ed.
+
+6
+
+RELATED WORK
+
+Multi Agent Path Finding (MAPF) and Multi Agent Reinforcement
+Learning (MARL) can be broadly classi�ed into centralized and
+decentralized approaches. Centralized approaches learn a single
+joint policy for all the agents, su�ering from the disadvantage of the
+curse of dimensionality [30]. Many joint approaches fail as the stateaction space expands combinatorially, and this requires impractical
+amounts of training data. Decentralized learning involves each
+agent autonomously learning its own policy, which could lead
+to instability, even in simple matrix games[45]. An in-between is
+‘Centralized Training Decentralized Execution’ (CTDE) which can
+be likened to an Actor-Critic approach. A centralized critic takes
+in all of the input and generates the policy, while the actors (i.e.
+agents) act on this information individually.
+
+Figure 7: Comparison of total time (training time + run
+time) against existing algorithms with increasing number of
+agents
+
+7
+
+Actor Critic Based Approaches. The use of PPO based on the
+CTDE approach is studied in several works such as MAPPO [45].
+They empirically show how PPO can be extended to the multi agent
+setting and performs comparably to o�ine algorithms such as Multi
+Agent Deep Deterministic Policy Gradient (MADDPG)[25] with
+minimal tuning of hyperparameters. They also identify �ve implementation and hyperparameter factors that strongly in�uence the
+performance of PPO and comment on how they can be optimized.
+While this work provides signi�cant insights toward minimizing
+tuning in PPO, the need to tune at least 5 hyperparameters and to
+train extensively for optimal performance remains a limitation.
+The approach in MAPPER [24] also involves the use of the principles of evolutionary algorithms by performing crossover, mutation
+and selection on the model parameters of each agent so that the
+probability of updating weights is directly proportional to the accumulated reward of the agent. It performs well where the grid
+size is limited and is relatively uncomplicated with dynamic obstacles. This algorithm is also limited in its requirement of extensive
+training to achieve good performance. Additionally, this algorithm
+penalizes oscillation by keeping a history of the states which is
+inconsistent with the Markov property.
+The authors of [41] use a CTDE multi-agent actor-critic approach
+consisting of multiple actors and a single critic with heterogeneous
+agents. In order to combat the di�culty of working with heterogeneous agents, they introduce an embedding network similar to the
+work in [43]. It is a fully connected layer that is assigned to each
+actor which transforms observations from each actor into a �xed
+length vector. This allows parameter sharing similar to a setting
+with homogeneous agents. The authors in [7], adopt PPO with
+modi�cations for multiple agents to reach multiple goals. They
+optimize the convex combinatorial problem of minimizing wait
+time and distance travelled by empty cabs. The experiments, run
+on real data from New York City, show very good results at the
+cost of extensive training data (on the order of tens of millions of
+episodes), as well as large training and wait times. The ride hailing
+problem has also been studied from the perspective of temporal
+di�erence learning and the bandit problem in [5]. The work in [48]
+also uses MARL along with reward function design to solve the
+problem of minimising wait times at tra�c signals.
+
+Path Planning Approaches. We also examine a number of
+works based on Con�ict Based Search [33]. The algorithms proposed by [2] work on dynamic environments with pre-decided
+constraints. The two algorithms - parallel and abstract CBS- are
+extensions of Con�ict Based Search. They also theoretically prove
+that the search methods are complete and optimal. A limitation
+is that the environment is learned by training on possible �xed
+con�gurations, rather than being dynamic in online settings.
+The work in [22] consists of other extensions of CBS, namely
+Multi Constraint CBS (MC-CBS) and Large Agent CBS (LA-CBS).
+This work corrects the usual assumption that agents do not necessarily occupy single points on the grid, rather requiring more complexity in maneuvering. These algorithms empirically outperform
+classic CBS by 3 orders of magnitude. The work in [32] presents an
+algorithm: LC-MAE (local multi agent evacuation). The empirical
+results are successful and e�cient for a number of 2D spaces that
+di�er in the level of navigation. CBS approaches, like A* and other
+informed search algorithms, are heavily dependent on the heuristic
+used. The authors in [1] also use a heuristic based approach to
+solve a multi agent patrolling problem where agents need to visit
+locations with speci�c frequencies in an environment that is hard
+to navigate.
+
+7
+
+CONCLUSIONS AND FUTURE WORK
+
+We study the problem of Multi Agent Path Finding in unknown
+environments with generalizable initial locations. We use an evolutionary game theoretic approach to develop our algorithm: MAPFEGT. We compare it to existing approaches in terms of scalability
+in environment size and number of agents. We use metrics such
+as computation time, path length and number of policy updates.
+We note that our algorithm performs comparable to or su�ciently
+better than these approaches under some constraints. A limitation is that our utility function does not support safety measures
+for minimizing distance from obstacles. We propose using Signal
+Temporal Logic properties in future work to add robustness to our
+algorithm. Our policy update function is theoretically parallelizable,
+and we propose an extension to parallelize the training to speed
+it up. We will also work on extending to continuous and dynamic
+environments.
+
+Game Theoretic Approaches. The work by [10] also tries to
+empirically show the achievement of an ESS in a game of foraging and acquiring resources set in a 2D grid space. We note that
+the game only consists of the interaction between agents in close
+proximity. The limitation of the results is that this algorithm is only
+compared against random strategies and a limited version of itself.
+The performance is not adequately better than random.
+The authors of [35] work on the problem of incentivizing cooperation among sel�sh agents where collaboration might be bene�cial. Their approach involves mechanism design. Another multi
+agent game theoretic approach in a di�erent setting is seen in
+[13]. They model multiagent interaction as correlated games where
+agents take decisions based on the partial information available
+to them. The authors of [8] work on the problem of coordinating
+multi robot swarms by formulating their interactions as extensive
+form games.
+
+REFERENCES
+
+[1] Noa Agmon, Daniel Urieli, and Peter Stone. 2011. Multiagent patrol generalized
+to complex environmental conditions. In Proceedings of the AAAI Conference on
+Arti�cial Intelligence, Vol. 25. 1090–1095.
+[2] Matteo Bellusci, Nicola Basilico, and Francesco Amigoni. 2020. Multi-agent path
+�nding in con�gurable environments. In Proceedings of the 19th International
+Conference on Autonomous Agents and MultiAgent Systems. 159–167.
+[3] Greg Brockman, Vicki Cheung, Ludwig Pettersson, Jonas Schneider, John Schulman, Jie Tang, and Wojciech Zaremba. 2016. Openai gym. arXiv preprint
+arXiv:1606.01540 (2016).
+[4] Lucian Busoniu, Robert Babuska, and Bart De Schutter. 2008. A Comprehensive
+Survey of Multiagent Reinforcement Learning. IEEE Transactions on Systems,
+Man, and Cybernetics, Part C (Applications and Reviews) 38, 2 (2008), 156–172.
+https://doi.org/10.1109/TSMCC.2007.913919
+[5] Haipeng Chen, Yan Jiao, Zhiwei Qin, Xiaocheng Tang, Hao Li, Bo An, Hongtu
+Zhu, and Jieping Ye. 2019. Inbede: integrating contextual bandit with td learning
+for joint pricing and dispatch of ride-hailing platforms. In 2019 IEEE International
+Conference on Data Mining (ICDM). IEEE, 61–70.
+[6] Shushman Choudhury, Kiril Solovey, Mykel Kochenderfer, and Marco Pavone.
+2021. Coordinated Multi-Agent Path�nding for Drones and Trucks over Road
+Networks. https://arxiv.org/abs/2110.08802
+
+8
+
+[7] Yuntian Deng, Hao Chen, Shiping Shao, Jiacheng Tang, Jianzong Pi, and Abhishek
+Gupta. 2022. Multi-objective vehicle rebalancing for ridehailing system using a
+reinforcement learning approach. Journal of Management Science and Engineering
+7, 2 (2022), 346–364.
+[8] Yinon Douchan. 2018. Reinforcement Learning in Multi-Robot Swarms. Master’s
+thesis. Tel Aviv University.
+[9] Yehuda Elmaliach, Noa Agmon, and Gal A Kaminka. 2009. Multi-robot area patrol
+under frequency constraints. Annals of Mathematics and Arti�cial Intelligence 57,
+3 (2009), 293–320.
+[10] Ahmad Esmaeili, Zahra Ghorrati, and Eric Matson. 2018. Multi-agent cooperation
+using snow-drift evolutionary game model: Case study in foraging task. In 2018
+Second IEEE International Conference on Robotic Computing (IRC). IEEE, 308–312.
+[11] Songyang Han, He Wang, Sanbao Su, Yuanyuan Shi, and Fei Miao. 2022. Stable
+and E�cient Shapley Value-Based Reward Reallocation for Multi-Agent Reinforcement Learning of Autonomous Vehicles. arXiv preprint arXiv:2203.06333
+(2022).
+[12] Peter E. Hart, Nils J. Nilsson, and Bertram Raphael. 1968. A Formal Basis for the
+Heuristic Determination of Minimum Cost Paths. IEEE Transactions on Systems
+Science and Cybernetics 4, 2 (1968), 100–107. https://doi.org/10.1109/TSSC.1968.
+300136
+[13] Xu He, Bo An, Yanghua Li, Haikai Chen, Rundong Wang, Xinrun Wang, Runsheng
+Yu, Xin Li, and Zhirong Wang. 2020. Learning to collaborate in multi-module
+recommendation via multi-agent reinforcement learning without communication.
+In Fourteenth ACM Conference on Recommender Systems. 210–219.
+[14] Alexandre Heuillet, Fabien Couthouis, and Natalia Díaz-Rodríguez. 2022. Collective explainable AI: Explaining cooperative strategies and agent contribution
+in multiagent reinforcement learning with shapley values. IEEE Computational
+Intelligence Magazine 17, 1 (2022), 59–71.
+[15] Junling Hu, Michael P Wellman, et al. 1998. Multiagent reinforcement learning:
+theoretical framework and an algorithm.. In ICML, Vol. 98. 242–250.
+[16] Kyle D Julian and Mykel J Kochenderfer. 2019. Distributed wild�re surveillance
+with autonomous aircraft using deep reinforcement learning. Journal of Guidance,
+Control, and Dynamics 42, 8 (2019), 1768–1778.
+[17] S. Koenig and M. Likhachev. 2001. Incremental Aast. In Advances in Neural Information Processing Systems, T. Dietterich, S. Becker, and Z. Ghahramani (Eds.), Vol. 14. MIT Press. https://proceedings.neurips.cc/paper/2001/
+�le/a591024321c5e2bdbd23ed35f0574dde-Paper.pdf
+[18] Sven Koenig and Maxim Likhachev. 2005. Fast replanning for navigation in
+unknown terrain. IEEE Transactions on Robotics 21, 3 (2005), 354–363.
+[19] Behrad Koohy, Sebastian Stein, Enrico Gerding, and Ghaithaa Manla. 2022. Reward function design in multi-agent reinforcement learning for tra�c signal
+control. (2022).
+[20] Richard E Korf. 1985. Depth-�rst iterative-deepening: An optimal admissible tree
+search. Arti�cial intelligence 27, 1 (1985), 97–109.
+[21] Jiaoyang Li, Zhe Chen, Yi Zheng, Shao-Hung Chan, Daniel Harabor, Peter J
+Stuckey, Hang Ma, and Sven Koenig. 2021. Scalable rail planning and replanning:
+Winning the 2020 �atland challenge. In Proceedings of the International Conference
+on Automated Planning and Scheduling, Vol. 31. 477–485.
+[22] Jiaoyang Li, Pavel Surynek, Ariel Felner, Hang Ma, TK Satish Kumar, and Sven
+Koenig. 2019. Multi-agent path �nding for large agents. In Proceedings of the
+AAAI Conference on Arti�cial Intelligence, Vol. 33. 7627–7634.
+[23] Jiaoyang Li, Andrew Tinka, Scott Kiesel, Joseph W Durham, TK Satish Kumar, and
+Sven Koenig. 2021. Lifelong multi-agent path �nding in large-scale warehouses.
+In Proceedings of the AAAI Conference on Arti�cial Intelligence, Vol. 35. 11272–
+11281.
+[24] Zuxin Liu, Baiming Chen, Hongyi Zhou, Guru Koushik, Martial Hebert, and Ding
+Zhao. 2020. Mapper: Multi-agent path planning with evolutionary reinforcement learning in mixed dynamic environments. In 2020 IEEE/RSJ International
+Conference on Intelligent Robots and Systems (IROS). IEEE, 11748–11754.
+[25] Ryan Lowe, Yi I Wu, Aviv Tamar, Jean Harb, OpenAI Pieter Abbeel, and Igor
+Mordatch. 2017. Multi-agent actor-critic for mixed cooperative-competitive
+environments. Advances in neural information processing systems 30 (2017).
+[26] Marco Andrés Luna, Mohammad Sadeq Ale Isaac, Ahmed Refaat Ragab, Pascual
+Campoy, Pablo Flores Peña, and Martin Molina. 2022. Fast Multi-UAV Path
+Planning for Optimal Area Coverage in Aerial Sensing Applications. Sensors 22,
+6 (2022), 2297.
+[27] Robert Morris, Corina S Pasareanu, Kasper Luckow, Waqar Malik, Hang Ma,
+TK Satish Kumar, and Sven Koenig. 2016. Planning, scheduling and monitoring
+for airport surface operations. In Workshops at the Thirtieth AAAI Conference on
+Arti�cial Intelligence.
+[28] Antonin Ra�n, Ashley Hill, Adam Gleave, Anssi Kanervisto, Maximilian Ernestus,
+and Noah Dormann. 2021. Stable-baselines3: Reliable reinforcement learning
+implementations. Journal of Machine Learning Research (2021).
+[29] William H. Sandholm. 2009. Evolutionary Game Theory. Springer New York, New
+York, NY, 3176–3205. https://doi.org/10.1007/978-0-387-30440-3_188
+[30] Guillaume Sartoretti, Justin Kerr, Yunfei Shi, Glenn Wagner, T. K. Satish Kumar,
+Sven Koenig, and Howie Choset. 2019. PRIMAL: Path�nding via Reinforcement
+and Imitation Multi-Agent Learning. IEEE Robotics and Automation Letters 4, 3
+
+(jul 2019), 2378–2385. https://doi.org/10.1109/lra.2019.2903261
+[31] John Schulman, Filip Wolski, Prafulla Dhariwal, Alec Radford, and Oleg Klimov.
+2017. Proximal policy optimization algorithms. arXiv preprint arXiv:1707.06347
+(2017).
+[32] Róbert Selvek and Pavel Surynek. 2019. Engineering Smart Behavior in Evacuation Planning using Local Cooperative Path Finding Algorithms and Agent-based
+Simulations. In KEOD.
+[33] Guni Sharon, Roni Stern, Ariel Felner, and Nathan R Sturtevant. 2015. Con�ictbased search for optimal multi-agent path�nding. Arti�cial Intelligence 219 (2015),
+40–66.
+[34] Satinder P Singh and Richard S Sutton. 1996. Reinforcement learning with
+replacing eligibility traces. Machine learning 22, 1 (1996), 123–158.
+[35] Arunesh Sinha and Michael P Wellman. 2019. Incentivizing collaboration in a
+competition. (2019).
+[36] J.M. Smith. 1982. Evolution and the Theory of Games. Cambridge University Press.
+https://books.google.com/books?id=Nag2IhmPS3gC
+[37] Anthony Stentz. 1997. Optimal and e�cient path planning for partially known
+environments. In Intelligent unmanned ground vehicles. Springer, 203–220.
+[38] Roni Stern, Nathan R Sturtevant, Ariel Felner, Sven Koenig, Hang Ma, Thayne T
+Walker, Jiaoyang Li, Dor Atzmon, Liron Cohen, TK Satish Kumar, et al. 2019. Multiagent path�nding: De�nitions, variants, and benchmarks. In Twelfth Annual
+Symposium on Combinatorial Search.
+[39] Richard S Sutton and Andrew G Barto. 2018. Reinforcement learning: An introduction. MIT press.
+[40] Sumanth Varambally, Jiaoyang Li, and Sven Koenig. 2022. Which MAPF Model
+Works Best for Automated Warehousing?. In Proceedings of the International
+Symposium on Combinatorial Search, Vol. 15. 190–198.
+[41] Ceyer Wakilpoor, Patrick J Martin, Carrie Rebhuhn, and Amanda Vu. 2020. Heterogeneous multi-agent reinforcement learning for unknown environment mapping.
+arXiv preprint arXiv:2010.02663 (2020).
+[42] Christopher JCH Watkins and Peter Dayan. 1992. Q-learning. Machine learning
+8, 3 (1992), 279–292.
+[43] DANNY WEYNS, MICHAEL SCHUMACHER, ALESSANDRO RICCI, MIRKO
+VIROLI, and TOM HOLVOET. 2005. Environments in multiagent systems. The
+Knowledge Engineering Review 20, 2 (2005), 127–141. https://doi.org/10.1017/
+S0269888905000457
+[44] Roi Yehoshua, Noa Agmon, and Gal A Kaminka. 2015. Frontier-Based RTDP: A
+New Approach to Solving the Robotic Adversarial Coverage Problem.. In AAMAS.
+861–869.
+[45] Chao Yu, Akash Velu, Eugene Vinitsky, Yu Wang, Alexandre M. Bayen, and Yi Wu.
+2021. The Surprising E�ectiveness of MAPPO in Cooperative, Multi-Agent Games.
+CoRR abs/2103.01955 (2021). arXiv:2103.01955 https://arxiv.org/abs/2103.01955
+[46] Alessandro Zanardi, Saverio Bolognani, Andrea Censi, and Emilio Frazzoli. 2021.
+Game Theoretical Motion Planning: Tutorial ICRA 2021. (2021).
+[47] Kaiqing Zhang, Zhuoran Yang, and Tamer Başar. 2021. Multi-agent reinforcement learning: A selective overview of theories and algorithms. Handbook of
+Reinforcement Learning and Control (2021), 321–384.
+[48] Theresa Ziemke, Lucas N Alegre, and Ana LC Bazzan. 2021. Reinforcement
+learning vs. rule-based adaptive tra�c signal control: A Fourier basis linear
+function approximation for tra�c signal control. AI Communications 34, 1 (2021),
+89–103.
+
+9
+
+

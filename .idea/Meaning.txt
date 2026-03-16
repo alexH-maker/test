@@ -1,0 +1,10 @@
+- `.idea` 目录是 JetBrains 系列（IntelliJ/PyCharm 等）存放项目元数据的地方；里面的 `.xml` 记录编辑器和工程配置，方便 IDE 还原你的开发环境。  
+- 常见文件作用：  
+  - `workspace.xml`：个人工作区会话（窗口布局、已打开文件、临时运行配置等），通常不建议提交。  
+  - `modules.xml` / `*.iml`：模块定义与源/资源路径、依赖指向，团队项目一般需要提交。  
+  - `misc.xml`：JDK 版本、语言级别等全局项目设置，需要提交。  
+  - `vcs.xml`：版本控制系统映射（如 Git），团队可提交。  
+  - `encodings.xml`：文件编码设置，可提交。  
+  - `inspectionProfiles`、`codeStyles` 等子目录：检查规则、代码风格，团队共享时提交。  
+- 提交建议（常见做法）：提交与项目一致性的配置（模块、JDK、VCS、编码、代码风格），不要提交个人化的会话/缓存（如 `workspace.xml`、`shelf/`、`httpRequests/`）。  
+- 如果你不用 JetBrains 或希望仓库干净，可把 `.idea` 整体加入 `.gitignore`，但团队内有人用 IDEA 时建议保留关键的可共享配置。
