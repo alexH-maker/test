@@ -34,8 +34,8 @@ def ensure_interactive_backend() -> None:
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser()
     p.add_argument('--agents', type=int, default=5, help='number of agents')#定义agent数量
-    p.add_argument('--width', type=int, default=80)  # paper: grid width
-    p.add_argument('--height', type=int, default=80)  # paper: grid height
+    p.add_argument('--width', type=int, default=100)  # paper: grid width
+    p.add_argument('--height', type=int, default=100)  # paper: grid height
     p.add_argument('--episodes', type=int, default=300)  # paper: total episodes
     p.add_argument('--max-steps', type=int, default=300)  # paper: max steps per episode T
     p.add_argument('--goal-bias', type=float, default=0.5)  # implementation: optional target bias
